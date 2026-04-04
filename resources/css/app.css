@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+@import "@heroui/styles";
+
+@source '../views';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+
+@theme {
+    /* --- 1. Font iOS (Apple) --- */
+    --font-sans:
+        -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* --- 2. Palet Warna Bengkel  --- */
+    --color-bengkel-orange: #f56b02;
+    --color-bengkel-orange-light: #f99607;
+    --color-bengkel-yellow: #fab214;
+    --color-bengkel-yellow-light: #fccf32;
+    --color-bengkel-yellow-pastel: #fcd97a;
+}
