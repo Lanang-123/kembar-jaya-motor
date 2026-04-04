@@ -14,7 +14,7 @@ return new class extends Migration
     Schema::create('suppliers', function (Blueprint $table) {
         $table->id();
 
-        $table->string('name'); // Nama Perusahaan/Toko Supplierr
+        $table->string('name'); // Nama Perusahaan/Toko Supplierrr
         $table->string('contact_person')->nullable(); // Nama sales/orang yang bisa dihubungi
         $table->string('phone', 20)->nullable(); // Nomor WA/Telepon
         $table->text('address')->nullable(); // Alamat untuk retur barang
