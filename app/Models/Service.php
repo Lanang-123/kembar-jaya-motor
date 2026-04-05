@@ -4,24 +4,17 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class Supplier extends Model
+class Service extends Model
 {
-
     protected $fillable = [
         'name',
-        'contact_person',
-        'phone',
-        'email',
-        'address',
+        'price',
+        'description',
         'is_active',
     ];
 
     protected $casts = [
+        'price' => 'integer',
         'is_active' => 'boolean',
     ];
-
-    public function products()
-    {
-        return $this->hasMany(Product::class);
-    }
 }
