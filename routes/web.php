@@ -21,7 +21,7 @@ Route::middleware('auth')->group(function () {
     Route::resource('services', ServiceController::class)->except(['create', 'edit', 'show']);
     Route::resource('vehicles', VehicleController::class)->except(['create', 'edit', 'show']);
     Route::resource('purchases', PurchaseController::class)->only(['index', 'store']);
-   Route::resource('transactions', TransactionController::class)->only(['index', 'store', 'update']);
+    Route::resource('transactions', TransactionController::class)->only(['index', 'store', 'update']);
 });
 
 Route::get('/', function () {
