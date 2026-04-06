@@ -17,7 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
+
+        $middleware->redirectTo(
+            guests: '/login',
+            users: '/transactions'
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
     })->create();
