@@ -44,6 +44,7 @@ export default function KasirPage({ products, services, vehicles, pendingTransac
         items: [] as CartItem[],
     });
 
+    // --- Action Handlers ---
     const handleQuickStoreVehicle = (e: React.FormEvent) => {
         e.preventDefault();
         router.post('/vehicles', newVehicle, {
@@ -78,6 +79,7 @@ export default function KasirPage({ products, services, vehicles, pendingTransac
         setEditingTransactionId(null); setInvoiceNumberDisplay(""); reset();
     };
 
+    // --- Cart Handlers ---
     const addProductToCart = () => {
         if (!selectedProduct) {
 return;
@@ -170,16 +172,27 @@ return;
 return alert("Keranjang masih kosong!");
 }
 
-        setData('status', 'pending');
+        // PERBAIKAN: Menambahkan 'as any' agar TypeScript tidak error
+        // saat menerima object CartItem[] ke dalam router payload Inertia.
+        const payload = {
+            ...data,
+            status: 'pending'
+        } as any;
 
         if (editingTransactionId) {
-            put(`/transactions/${editingTransactionId}`, { onSuccess: () => {
- cancelEdit(); alert("Berhasil masuk list Nota Gantung!");
-} });
+            router.put(`/transactions/${editingTransactionId}`, payload, {
+                onSuccess: () => {
+                    cancelEdit();
+                    alert("Berhasil mengupdate Nota Gantung!");
+                }
+            });
         } else {
-            post('/transactions', { onSuccess: () => {
- reset(); alert("Berhasil masuk list Nota Gantung!");
-} });
+            router.post('/transactions', payload, {
+                onSuccess: () => {
+                    reset();
+                    alert("Berhasil masuk list Nota Gantung!");
+                }
+            });
         }
     };
 
@@ -384,7 +397,6 @@ window.print();
                             </div>
                         )}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                            {/* Tombol Simpan Sementara langsung tembak API */}
                             <button type="button" onClick={handleDirectSave} style={{ padding: '11px', background: '#475569', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}>
                                 📄 Simpan Sementara (Masuk List)
                             </button>
