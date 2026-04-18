@@ -16,8 +16,10 @@ class PurchaseController extends Controller
     {
         $search = $request->input('search');
 
+        // 1. TANGKAP PARAMETER perPage (Default 10)
+        $perPage = $request->input('perPage', 10);
+
         return Inertia::render('purchase/index', [
-            // Load Relasi Supplier dan Details beserta Produknya
             'purchases' => Purchase::with(['supplier', 'details.product'])
                 ->when($search, function ($query, $search) {
                     $query->where('invoice_number', 'like', "%{$search}%")
@@ -26,16 +28,21 @@ class PurchaseController extends Controller
                           });
                 })
                 ->latest()
-                ->paginate(10)
+                // 2. MASUKKAN $perPage KE DALAM PAGINATE
+                ->paginate($perPage)
                 ->withQueryString(),
 
-            // Kirim data master untuk form input
             'suppliers' => Supplier::where('is_active', true)->orderBy('name')->get(['id', 'name']),
             'products' => Product::where('is_active', true)
-            ->orderBy('name')
-            // WAJIB TAMBAHKAN 'supplier_id' DI BAWAH INI
-            ->get(['id', 'supplier_id', 'name', 'sku', 'purchase_price', 'stock', 'unit']),
-                ]);
+                ->orderBy('name')
+                ->get(['id', 'supplier_id', 'name', 'sku', 'purchase_price', 'stock', 'unit']),
+
+            // 3. KEMBALIKAN STATE KE FRONTEND
+            'filters' => [
+                'search' => $search,
+                'perPage' => $perPage
+            ]
+        ]);
     }
 
     public function store(Request $request)

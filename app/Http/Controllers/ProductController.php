@@ -13,6 +13,10 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         $search = $request->input('search');
+
+        // 1. TANGKAP PARAMETER perPage (Default 10 jika tidak ada)
+        $perPage = $request->input('perPage', 10);
+
         return Inertia::render('produk/index', [
             'products' => Product::with('supplier')
                 ->when($search, function ($query, $search) {
@@ -20,7 +24,8 @@ class ProductController extends Controller
                           ->orWhere('sku', 'like', "%{$search}%");
                 })
                 ->latest()
-                ->paginate(10)
+                // 2. MASUKKAN VARIABEL $perPage KE DALAM PAGINATE
+                ->paginate($perPage)
                 ->withQueryString(),
 
             'suppliers' => Supplier::where('is_active', true)
@@ -28,7 +33,11 @@ class ProductController extends Controller
                 ->orderBy('name')
                 ->get(),
 
-            'filters' => ['search' => $search]
+            // 3. KEMBALIKAN STATE perPage KE FRONTEND
+            'filters' => [
+                'search' => $search,
+                'perPage' => $perPage
+            ]
         ]);
     }
 

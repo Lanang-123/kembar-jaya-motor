@@ -12,15 +12,24 @@ class ServiceController extends Controller
     {
         $search = $request->input('search');
 
+        // 1. TANGKAP PARAMETER perPage (Default 10)
+        $perPage = $request->input('perPage', 10);
+
         return Inertia::render('service/index', [
             'services' => Service::query()
                 ->when($search, function ($query, $search) {
                     $query->where('name', 'like', "%{$search}%");
                 })
                 ->latest()
-                ->paginate(10)
+                // 2. MASUKKAN $perPage KE DALAM PAGINATE
+                ->paginate($perPage)
                 ->withQueryString(),
-            'filters' => ['search' => $search]
+
+            // 3. KEMBALIKAN STATE KE FRONTEND
+            'filters' => [
+                'search' => $search,
+                'perPage' => $perPage
+            ]
         ]);
     }
 

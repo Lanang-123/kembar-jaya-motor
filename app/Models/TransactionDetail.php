@@ -19,6 +19,12 @@ class TransactionDetail extends Model
         'subtotal' => 'integer',
     ];
 
+    // --- RELASI BARU YANG DITAMBAHKAN ---
+    public function transaction(): BelongsTo
+    {
+        return $this->belongsTo(Transaction::class);
+    }
+
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);

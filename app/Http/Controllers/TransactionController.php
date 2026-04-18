@@ -7,6 +7,7 @@ use App\Models\TransactionDetail;
 use App\Models\Product;
 use App\Models\Service;
 use App\Models\Vehicle;
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
@@ -16,8 +17,10 @@ class TransactionController extends Controller
 {
     public function index()
     {
+        $setting = Setting::first();
+
         return Inertia::render('transaction/index', [
-            'products' => Product::where('is_active', true)->where('stock', '>', 0)->get(),
+            'products' => Product::where('is_active', true)->get(),
             'services' => Service::where('is_active', true)->get(),
             'vehicles' => Vehicle::latest()->get(['id', 'license_plate', 'customer_name', 'brand', 'type', 'year']),
 
@@ -25,6 +28,8 @@ class TransactionController extends Controller
                 ->where('status', 'pending')
                 ->latest()
                 ->get(),
+
+            'setting' => $setting,
         ]);
     }
 
@@ -40,20 +45,20 @@ class TransactionController extends Controller
             'items.*.type' => 'required|in:product,service',
             'items.*.id' => 'required|integer',
             'items.*.quantity' => 'required|integer|min:1',
-            'items.*.price' => 'required|numeric|min:0', // <-- Validasi untuk menerima harga dari layar Kasir/Nota
+            'items.*.price' => 'required|numeric|min:0',
         ]);
 
         DB::transaction(function () use ($validated) {
             $totalAmount = 0;
             $invoiceNumber = 'TRX-' . date('Ymd') . '-' . strtoupper(Str::random(4));
 
-            // Jika statusnya 'pending' (Simpan Sementara), paksa uang bayar jadi 0
             $paymentAmount = $validated['status'] === 'pending' ? 0 : ($validated['payment_amount'] ?? 0);
+            $paymentMethod = $validated['payment_method'];
 
             $transaction = Transaction::create([
                 'invoice_number' => $invoiceNumber,
                 'vehicle_id' => $validated['vehicle_id'],
-                'payment_method' => $validated['payment_method'],
+                'payment_method' => $paymentMethod,
                 'notes' => $validated['notes'],
                 'status' => $validated['status'],
                 'total_amount' => 0,
@@ -62,7 +67,7 @@ class TransactionController extends Controller
             ]);
 
             foreach ($validated['items'] as $item) {
-                $inputPrice = $item['price']; // <-- Ambil harga dari ketikan kasir di Nota
+                $inputPrice = $item['price'];
                 $subtotal = $inputPrice * $item['quantity'];
                 $totalAmount += $subtotal;
 
@@ -73,7 +78,6 @@ class TransactionController extends Controller
                         throw new \Exception("Stok {$product->name} tidak mencukupi.");
                     }
 
-                    // FITUR BARU: Update Harga Jual di Master Produk jika harganya diubah oleh kasir
                     if ($product->selling_price != $inputPrice) {
                         $product->update(['selling_price' => $inputPrice]);
                     }
@@ -82,19 +86,17 @@ class TransactionController extends Controller
                         'transaction_id' => $transaction->id,
                         'product_id' => $product->id,
                         'item_name' => $product->name,
-                        'price' => $inputPrice, // <-- Simpan harga dari kasir ke nota
+                        'price' => $inputPrice,
                         'capital_price' => $product->purchase_price,
                         'quantity' => $item['quantity'],
                         'subtotal' => $subtotal,
                     ]);
 
-                    // STOK TETAP DIKURANGI meskipun "Simpan Sementara",
                     $product->decrement('stock', $item['quantity']);
 
                 } elseif ($item['type'] === 'service') {
                     $service = Service::findOrFail($item['id']);
 
-                    // FITUR BARU: Update Harga Jasa di Master Jasa jika harganya diubah oleh kasir
                     if ($service->price != $inputPrice) {
                         $service->update(['price' => $inputPrice]);
                     }
@@ -103,7 +105,7 @@ class TransactionController extends Controller
                         'transaction_id' => $transaction->id,
                         'service_id' => $service->id,
                         'item_name' => $service->name,
-                        'price' => $inputPrice, // <-- Simpan harga dari kasir ke nota
+                        'price' => $inputPrice,
                         'capital_price' => 0,
                         'quantity' => $item['quantity'],
                         'subtotal' => $subtotal,
@@ -111,17 +113,32 @@ class TransactionController extends Controller
                 }
             }
 
-            // Hitung kembalian (Hanya jika statusnya completed)
-            $changeAmount = $validated['status'] === 'completed' ? ($paymentAmount - $totalAmount) : 0;
+            // --- SECURITY CHECK & AUTO-CORRECT ---
+            if ($validated['status'] === 'completed') {
+                $changeAmount = $paymentAmount - $totalAmount;
+
+                if ($paymentMethod !== 'KASBON' && $changeAmount < 0) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'payment_amount' => 'Pembayaran kurang! Gunakan metode KASBON jika pelanggan berhutang.'
+                    ]);
+                }
+
+                // AUTO-CORRECT: Kasir milih KASBON tapi uangnya cukup (Lunas)
+                if ($paymentMethod === 'KASBON' && $changeAmount >= 0) {
+                    $paymentMethod = 'CASH';
+                }
+            } else {
+                $changeAmount = 0;
+            }
 
             if ($validated['vehicle_id'] && $validated['status'] === 'completed') {
-                // Update tanggal servis kendaraan HANYA jika sudah lunas/selesai
                 Vehicle::where('id', $validated['vehicle_id'])->update([
                     'last_service_date' => now()
                 ]);
             }
 
             $transaction->update([
+                'payment_method' => $paymentMethod,
                 'total_amount' => $totalAmount,
                 'change_amount' => $changeAmount,
             ]);
@@ -142,26 +159,24 @@ class TransactionController extends Controller
             'items.*.type' => 'required|in:product,service',
             'items.*.id' => 'required|integer',
             'items.*.quantity' => 'required|integer|min:1',
-            'items.*.price' => 'required|numeric|min:0', // <-- Validasi harga untuk mode Update
+            'items.*.price' => 'required|numeric|min:0',
         ]);
 
         DB::transaction(function () use ($validated, $transaction) {
-            // 1. KEMBALIKAN STOK LAMA (Restore)
             foreach ($transaction->details as $oldDetail) {
                 if ($oldDetail->product_id) {
                     Product::where('id', $oldDetail->product_id)->increment('stock', $oldDetail->quantity);
                 }
             }
 
-            // 2. HAPUS RINCIAN LAMA
             $transaction->details()->delete();
 
-            // 3. MASUKKAN RINCIAN BARU & POTONG STOK ULANG
             $totalAmount = 0;
             $paymentAmount = $validated['status'] === 'pending' ? 0 : ($validated['payment_amount'] ?? 0);
+            $paymentMethod = $validated['payment_method'];
 
             foreach ($validated['items'] as $item) {
-                $inputPrice = $item['price']; // <-- Ambil harga dari ketikan kasir
+                $inputPrice = $item['price'];
                 $subtotal = $inputPrice * $item['quantity'];
                 $totalAmount += $subtotal;
 
@@ -172,7 +187,6 @@ class TransactionController extends Controller
                         throw new \Exception("Stok {$product->name} tidak mencukupi.");
                     }
 
-                    // FITUR BARU: Update Harga Jual di Master Produk jika diubah
                     if ($product->selling_price != $inputPrice) {
                         $product->update(['selling_price' => $inputPrice]);
                     }
@@ -181,7 +195,7 @@ class TransactionController extends Controller
                         'transaction_id' => $transaction->id,
                         'product_id' => $product->id,
                         'item_name' => $product->name,
-                        'price' => $inputPrice, // <-- Simpan harga dari kasir ke nota
+                        'price' => $inputPrice,
                         'capital_price' => $product->purchase_price,
                         'quantity' => $item['quantity'],
                         'subtotal' => $subtotal,
@@ -192,7 +206,6 @@ class TransactionController extends Controller
                 } elseif ($item['type'] === 'service') {
                     $service = Service::findOrFail($item['id']);
 
-                    // FITUR BARU: Update Harga Jasa di Master Jasa jika diubah
                     if ($service->price != $inputPrice) {
                         $service->update(['price' => $inputPrice]);
                     }
@@ -201,7 +214,7 @@ class TransactionController extends Controller
                         'transaction_id' => $transaction->id,
                         'service_id' => $service->id,
                         'item_name' => $service->name,
-                        'price' => $inputPrice, // <-- Simpan harga dari kasir ke nota
+                        'price' => $inputPrice,
                         'capital_price' => 0,
                         'quantity' => $item['quantity'],
                         'subtotal' => $subtotal,
@@ -209,8 +222,23 @@ class TransactionController extends Controller
                 }
             }
 
-            // 4. UPDATE HEADER NOTA
-            $changeAmount = $validated['status'] === 'completed' ? ($paymentAmount - $totalAmount) : 0;
+            // --- SECURITY CHECK & AUTO-CORRECT ---
+            if ($validated['status'] === 'completed') {
+                $changeAmount = $paymentAmount - $totalAmount;
+
+                if ($paymentMethod !== 'KASBON' && $changeAmount < 0) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'payment_amount' => 'Pembayaran kurang! Gunakan metode KASBON jika pelanggan berhutang.'
+                    ]);
+                }
+
+                // AUTO-CORRECT
+                if ($paymentMethod === 'KASBON' && $changeAmount >= 0) {
+                    $paymentMethod = 'CASH';
+                }
+            } else {
+                $changeAmount = 0;
+            }
 
             if ($validated['vehicle_id'] && $validated['status'] === 'completed') {
                 Vehicle::where('id', $validated['vehicle_id'])->update(['last_service_date' => now()]);
@@ -218,7 +246,7 @@ class TransactionController extends Controller
 
             $transaction->update([
                 'vehicle_id' => $validated['vehicle_id'],
-                'payment_method' => $validated['payment_method'],
+                'payment_method' => $paymentMethod,
                 'status' => $validated['status'],
                 'total_amount' => $totalAmount,
                 'payment_amount' => $paymentAmount,
@@ -227,5 +255,34 @@ class TransactionController extends Controller
         });
 
         return redirect()->back()->with('message', 'Transaksi berhasil diperbarui dan dilunasi.');
+    }
+
+    // ====================================================================
+    // --- FITUR BARU: FUNGSI KHUSUS UNTUK MELUNASI KASBON DARI HISTORY ---
+    // ====================================================================
+    public function payDebt(Request $request, Transaction $transaction)
+    {
+        $request->validate([
+            'payment_amount' => 'required|numeric|min:1'
+        ]);
+
+        // Hitung total uang yang sudah dibayarkan sejauh ini ditambah pembayaran baru
+        $newPaymentAmount = $transaction->payment_amount + $request->payment_amount;
+        $changeAmount = $newPaymentAmount - $transaction->total_amount;
+
+        $paymentMethod = $transaction->payment_method;
+
+        // Jika hutang sudah lunas (uang pas atau kembalian)
+        if ($changeAmount >= 0) {
+            $paymentMethod = 'CASH'; // Ubah status menjadi CASH agar hilang dari daftar Kasbon
+        }
+
+        $transaction->update([
+            'payment_amount' => $newPaymentAmount,
+            'change_amount' => $changeAmount,
+            'payment_method' => $paymentMethod
+        ]);
+
+        return redirect()->back()->with('message', 'Pelunasan hutang berhasil diproses.');
     }
 }

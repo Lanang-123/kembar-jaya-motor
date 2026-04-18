@@ -1,208 +1,365 @@
-import { useForm, router } from "@inertiajs/react";
-import { useState } from "react";
-import Metadata from "@/lib/metadata";
+"use client";
 
-// Tipe Data
-interface Supplier {
-    id: number;
-    name: string;
-}
+import {
+    PlusIcon, PencilSquareIcon, TrashIcon,
+    MagnifyingGlassIcon, PhotoIcon, ArchiveBoxIcon,
+    ExclamationTriangleIcon
+} from '@heroicons/react/24/outline';
+import { toast } from '@heroui/react';
+import { Head, useForm, router } from '@inertiajs/react';
+import { useState, useEffect } from 'react';
 
-interface Product {
-    id: number;
-    supplier_id: number | null;
-    supplier: Supplier | null; // Relasi
-    name: string;
-    sku: string;
-    stock: number;
-    unit: string;
-    purchase_price: number;
-    selling_price: number;
-    description: string;
-    image: string | null;
-}
+import CustomButton from '@/ui/Button/CustomButton';
+import FormInput from '@/ui/Input/FormInput';
+import CustomModal from '@/ui/Modal/CustomModal';
+import CustomTable, { Th, Td, TablePagination } from '@/ui/Table/CustomTable'
 
-export default function ProductPage({ products, suppliers }: any) {
-    const [editingId, setEditingId] = useState<number | null>(null);
+// --- TIPE DATA ---
+interface Supplier { id: number; name: string; }
+interface Product { id: number; supplier_id: number | null; supplier: Supplier | null; name: string; sku: string; stock: number; unit: string; purchase_price: number; selling_price: number; description: string | null; image: string | null; }
+interface PaginationLink { url: string | null; label: string; active: boolean; }
+interface PaginatedData { data: Product[]; links: PaginationLink[]; from: number; to: number; total: number; }
 
-    // Inertia useForm
-    const { data, setData, post, processing, reset } = useForm({
-        supplier_id: '',
-        name: '',
-        sku: '',
-        stock: 0,
+export default function ProductIndex({ products, suppliers, filters }: { products: PaginatedData, suppliers: Supplier[], filters: any }) {
+
+    const [search, setSearch] = useState(filters?.search || '');
+    const [perPage, setPerPage] = useState(filters?.perPage || 10);
+
+    // State Modal Form
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+
+    // State Modal Konfirmasi Hapus
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState<Product | null>(null);
+
+    // PERBAIKAN 1: Nilai awal untuk angka diubah menjadi empty string ('') agar input box kosong saat dibuka
+    const { data, setData, post, processing, errors, clearErrors, reset } = useForm({
+        supplier_id: '', name: '', sku: '',
+        stock: '' as number | string,
         unit: 'Pcs',
-        purchase_price: 0,
-        selling_price: 0,
-        description: '',
-        image: null as File | null,
-        _method: 'post', // Default method
+        purchase_price: '' as number | string,
+        selling_price: '' as number | string,
+        description: '', image: null as File | null, _method: 'post',
     });
+
+    useEffect(() => {
+        const delaySearch = setTimeout(() => {
+            router.get('/products', { search, perPage }, { preserveState: true, replace: true });
+        }, 500);
+
+        return () => clearTimeout(delaySearch);
+    }, [search, perPage]);
+
+    const openCreateModal = () => {
+        clearErrors();
+        setEditingProduct(null);
+        // PERBAIKAN 2: Pastikan nilai yang di-reset juga empty string, BUKAN 0
+        setData({
+            supplier_id: '', name: '', sku: '',
+            stock: '', unit: 'Pcs',
+            purchase_price: '', selling_price: '',
+            description: '', image: null, _method: 'post'
+        });
+        setIsModalOpen(true);
+    };
+
+    const closeModal = () => {
+        setIsModalOpen(false); reset();
+    };
+
+    const openEditModal = (product: Product) => {
+        clearErrors();
+        setEditingProduct(product);
+        setData({
+            supplier_id: product.supplier_id ? product.supplier_id.toString() : '',
+            name: product.name, sku: product.sku || '',
+            stock: product.stock, unit: product.unit,
+            purchase_price: product.purchase_price, selling_price: product.selling_price,
+            description: product.description || '', image: null, _method: 'put',
+        });
+        setIsModalOpen(true);
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-
-        if (editingId) {
-            // TRIK INERTIA: Untuk update data yang mengandung FILE, kita TETAP pakai method POST ke url axios,
-            // tapi kita beri tahu Laravel bahwa ini sebenarnya PUT lewat property _method
-            // eslint-disable-next-line react-hooks/immutability
-            data._method = 'put';
-            post(`/products/${editingId}`, {
-                onSuccess: () => {
-                    reset();
-                    setEditingId(null);
-                },
-            });
-        } else {
-            data._method = 'post';
-            post('/products', {
-                onSuccess: () => reset(),
-            });
-        }
-    };
-
-    const handleEdit = (product: Product) => {
-        setEditingId(product.id);
-        setData({
-            supplier_id: product.supplier_id ? product.supplier_id.toString() : '',
-            name: product.name,
-            sku: product.sku || '',
-            stock: product.stock,
-            unit: product.unit,
-            purchase_price: product.purchase_price,
-            selling_price: product.selling_price,
-            description: product.description || '',
-            image: null, // Jangan isi image lama ke input file, biarkan user upload baru jika mau ganti
-            _method: 'put',
+        const url = editingProduct ? `/products/${editingProduct.id}` : '/products';
+        post(url, {
+            preserveScroll: true,
+            onSuccess: () => {
+                closeModal(); toast.success("Berhasil!", { description: editingProduct ? "Data diperbarui." : "Produk didaftarkan." });
+            },
+            onError: () => toast.danger("Gagal menyimpan", { description: "Periksa kembali isian form." })
         });
     };
 
-    const cancelEdit = () => {
-        reset();
-        setEditingId(null);
+    const confirmDelete = (product: Product) => {
+        setItemToDelete(product);
+        setIsDeleteModalOpen(true);
     };
 
-    const handleDelete = (id: number) => {
-        if (confirm('Yakin ingin menghapus produk beserta gambarnya?')) {
-            router.delete(`/products/${id}`);
+    const executeDelete = () => {
+        if (itemToDelete) {
+            router.delete(`/products/${itemToDelete.id}`, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setIsDeleteModalOpen(false);
+                    setItemToDelete(null);
+                    toast.success("Terhapus!", { description: "Produk berhasil dihapus permanen." });
+                }
+            });
         }
     };
 
+    const isFmt = (n: number) => n.toLocaleString('id-ID');
+
     return (
-        <>
-            <Metadata title="Test CRUD Product" />
+        <div className="flex flex-col gap-6 w-full">
+            <Head title="Data Produk / Sparepart" />
 
-            <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
-                <h2>{editingId ? 'Edit Produk' : 'Test Tambah Produk (Create)'}</h2>
+            {/* ── HEADER HALAMAN ── */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Katalog Sparepart</h1>
+                    <p className="text-sm font-medium text-slate-500 mt-1">Kelola data master inventaris dan harga barang.</p>
+                </div>
+                <CustomButton variant="primary" onClick={openCreateModal} className="flex items-center gap-2 shrink-0 shadow-md shadow-bengkel-orange/20 font-semibold">
+                    <PlusIcon className="w-5 h-5 stroke-2" />
+                    Daftarkan Produk
+                </CustomButton>
+            </div>
 
-                <form onSubmit={handleSubmit} style={{ marginBottom: '30px', display: 'flex', gap: '10px', flexWrap: 'wrap', maxWidth: '900px', background: editingId ? '#fffbea' : '#f8fafc', padding: '15px', border: '1px solid #ccc' }}>
-
-                    {/* Dropdown Relasi Supplier */}
-                    <div style={{ width: '100%' }}>
+            {/* ── KONTEN TABEL ── */}
+            <CustomTable
+                headerLeft={
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <span className="font-medium">Tampilkan</span>
                         <select
-                            value={data.supplier_id}
-                            onChange={e => setData('supplier_id', e.target.value)}
-                            style={{ padding: '5px', width: '200px' }}
+                            value={perPage}
+                            onChange={(e) => setPerPage(Number(e.target.value))}
+                            className="h-9 px-3 py-1 bg-white border border-slate-200 rounded-lg outline-none focus:border-bengkel-yellow focus:ring-2 focus:ring-bengkel-yellow-light/30 font-bold text-slate-800 cursor-pointer"
                         >
-                            <option value="">-- Pilih Supplier (Opsional) --</option>
-                            {suppliers.map((sup: Supplier) => (
-                                <option key={sup.id} value={sup.id}>{sup.name}</option>
-                            ))}
+                            <option value={10}>10</option>
+                            <option value={25}>25</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
                         </select>
+                        <span className="font-medium">Entri</span>
                     </div>
-
-                    <input type="text" placeholder="Nama Produk *" value={data.name} onChange={e => setData('name', e.target.value)} required style={{ padding: '5px' }} />
-                    <input type="text" placeholder="SKU / Barcode" value={data.sku} onChange={e => setData('sku', e.target.value)} style={{ padding: '5px' }} />
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <label>Stok:</label>
-                        <input type="number" placeholder="Stok" value={data.stock} onChange={e => setData('stock', Number(e.target.value))} required style={{ padding: '5px', width: '80px' }} />
-                    </div>
-
-                    <input type="text" placeholder="Satuan (Pcs, Liter)" value={data.unit} onChange={e => setData('unit', e.target.value)} required style={{ padding: '5px', width: '120px' }} />
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <label>Harga Beli:</label>
-                        <input type="number" placeholder="Modal" value={data.purchase_price} onChange={e => setData('purchase_price', Number(e.target.value))} required style={{ padding: '5px', width: '120px' }} />
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <label>Harga Jual:</label>
-                        <input type="number" placeholder="Jual" value={data.selling_price} onChange={e => setData('selling_price', Number(e.target.value))} required style={{ padding: '5px', width: '120px' }} />
-                    </div>
-
-                    {/* Input Upload File Gambar */}
-                    <div style={{ width: '100%', marginTop: '10px' }}>
-                        <label>Gambar Produk (Opsional, Maks 2MB): </label>
+                }
+                headerRight={
+                    <div className="relative w-full sm:w-[320px]">
+                        <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 stroke-2" />
                         <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => setData('image', e.target.files ? e.target.files[0] : null)}
+                            type="text"
+                            placeholder="Cari nama atau SKU produk..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="w-full h-10 pl-10 pr-4 text-sm bg-white border border-slate-200 rounded-lg outline-none focus:border-bengkel-yellow focus:ring-2 focus:ring-bengkel-yellow-light/30 transition-all shadow-sm"
                         />
                     </div>
-
-                    <div style={{ width: '100%', marginTop: '10px' }}>
-                        <button type="submit" disabled={processing} style={{ padding: '5px 15px', background: editingId ? 'orange' : '#3b82f6', color: 'white', border: 'none', cursor: 'pointer' }}>
-                            {processing ? 'Menyimpan...' : (editingId ? 'Update Data' : 'Simpan ke Database')}
-                        </button>
-
-                        {editingId && (
-                            <button type="button" onClick={cancelEdit} disabled={processing} style={{ padding: '5px 15px', marginLeft: '10px', cursor: 'pointer' }}>
-                                Batal
-                            </button>
-                        )}
-                    </div>
-                </form>
-
-                <h2>Daftar Produk</h2>
-
-                <table border={1} cellPadding={10} style={{ borderCollapse: 'collapse', width: '100%' }}>
-                    <thead style={{ background: '#eee', textAlign: 'left' }}>
-                        <tr>
-                            <th>Gambar</th>
-                            <th>Nama & SKU</th>
-                            <th>Supplier</th>
-                            <th>Stok</th>
-                            <th>Harga Modal</th>
-                            <th>Harga Jual</th>
-                            <th>Aksi</th>
+                }
+                thead={
+                    <>
+                        <Th className="w-16 text-center">Foto</Th>
+                        <Th>Nama & SKU</Th>
+                        <Th>Supplier</Th>
+                        <Th className="text-right">Stok</Th>
+                        <Th className="text-right">Modal</Th>
+                        <Th className="text-right">Harga Jual</Th>
+                        <Th className="text-center w-24">Aksi</Th>
+                    </>
+                }
+                pagination={
+                    <TablePagination
+                        from={products.from}
+                        to={products.to}
+                        total={products.total}
+                        links={products.links}
+                        onPageChange={(url) => router.get(url, { search, perPage }, { preserveState: true })}
+                    />
+                }
+            >
+                {products.data.length > 0 ? (
+                    products.data.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
+                            <Td className="text-center">
+                                <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 mx-auto shadow-sm">
+                                    {item.image ? (
+                                        <img src={`/storage/${item.image}`} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                                    ) : (
+                                        <PhotoIcon className="w-6 h-6 text-slate-300" />
+                                    )}
+                                </div>
+                            </Td>
+                            <Td>
+                                <p className="font-bold text-slate-800">{item.name}</p>
+                                <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">{item.sku || 'Tanpa SKU'}</p>
+                            </Td>
+                            <Td>
+                                {item.supplier ? (
+                                    <span className="bg-blue-50 text-blue-600 border border-blue-100 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider">
+                                        {item.supplier.name}
+                                    </span>
+                                ) : (
+                                    <span className="text-slate-300 font-bold text-[11px] uppercase tracking-wider">-</span>
+                                )}
+                            </Td>
+                            <Td className="text-right">
+                                <span className={`text-base font-bold ${item.stock <= 5 ? 'text-red-500' : 'text-slate-800'}`}>{item.stock}</span>
+                                <span className="text-[10px] font-bold text-slate-400 ml-1.5 uppercase tracking-wider">{item.unit}</span>
+                            </Td>
+                            <Td className="text-right font-bold text-slate-600">Rp {isFmt(item.purchase_price)}</Td>
+                            <Td className="text-right font-bold text-bengkel-orange">Rp {isFmt(item.selling_price)}</Td>
+                            <Td>
+                                <div className="flex items-center justify-center gap-2">
+                                    <button onClick={() => openEditModal(item)} className="hover:cursor-pointer w-8 h-8 rounded-sm bg-slate-100 text-slate-500 hover:bg-amber-500 hover:text-white flex items-center justify-center transition-colors shadow-sm" title="Edit">
+                                        <PencilSquareIcon className="w-4 h-4 stroke-2" />
+                                    </button>
+                                    <button onClick={() => confirmDelete(item)} className="hover:cursor-pointer w-8 h-8 rounded-sm bg-slate-100 text-slate-500 hover:bg-red-500 hover:text-white flex items-center justify-center transition-colors shadow-sm" title="Hapus">
+                                        <TrashIcon className="w-4 h-4 stroke-2" />
+                                    </button>
+                                </div>
+                            </Td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {products?.data?.length > 0 ? (
-                            products.data.map((product: Product) => (
-                                <tr key={product.id}>
-                                    <td>
-                                        {/* TAMPILKAN GAMBAR DARI FOLDER STORAGE */}
-                                        {product.image ? (
-                                            <img src={`/storage/${product.image}`} alt={product.name} style={{ width: '50px', height: '50px', objectFit: 'cover' }} />
-                                        ) : (
-                                            <div style={{ width: '50px', height: '50px', background: '#ccc', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No Img</div>
-                                        )}
-                                    </td>
-                                    <td>
-                                        <strong>{product.name}</strong><br/>
-                                        <small style={{ color: 'gray' }}>SKU: {product.sku || '-'}</small>
-                                    </td>
-                                    {/* MENGAKSES RELASI SUPPLIER */}
-                                    <td>{product.supplier ? product.supplier.name : '-'}</td>
-                                    <td>{product.stock} {product.unit}</td>
-                                    <td>Rp {product.purchase_price.toLocaleString('id-ID')}</td>
-                                    <td>Rp {product.selling_price.toLocaleString('id-ID')}</td>
-                                    <td style={{ display: 'flex', gap: '10px', alignItems: 'center', height: '60px' }}>
-                                        <button onClick={() => handleEdit(product)} style={{ color: 'blue', cursor: 'pointer' }}>Edit</button>
-                                        <button onClick={() => handleDelete(product.id)} style={{ color: 'red', cursor: 'pointer' }}>Hapus</button>
-                                    </td>
-                                </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={7} style={{ textAlign: 'center' }}>Belum ada data produk.</td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-        </>
+                    ))
+                ) : (
+                    <tr>
+                        <Td colSpan={7} className="py-20">
+                            <div className="flex flex-col items-center justify-center gap-3 text-slate-400">
+                                <ArchiveBoxIcon className="w-12 h-12 opacity-20 stroke-1" />
+                                <span className="text-sm font-bold">Tidak ada data produk ditemukan.</span>
+                            </div>
+                        </Td>
+                    </tr>
+                )}
+            </CustomTable>
+
+            {/* ── MODAL KONFIRMASI HAPUS ── */}
+            <CustomModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                variant="confirm"
+                title="Hapus Produk?"
+                description={`Apakah Anda yakin ingin menghapus produk "${itemToDelete?.name}"? Data, gambar, dan riwayat terkait akan hilang permanen.`}
+                icon={<ExclamationTriangleIcon className="w-8 h-8 stroke-2" />}
+                footer={
+                    <>
+                        <CustomButton variant="base" onClick={() => setIsDeleteModalOpen(false)}>
+                            Batal
+                        </CustomButton>
+                        <button
+                            onClick={executeDelete}
+                            disabled={processing}
+                            className="h-11 px-6 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-all shadow-md shadow-red-500/20 disabled:opacity-50 hover:cursor-pointer"
+                        >
+                            Ya, Hapus Data
+                        </button>
+                    </>
+                }
+            >
+                <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 text-left">
+                    <p className="text-xs font-bold text-slate-700 mb-1">Informasi Data:</p>
+                    <p className="text-sm text-slate-600 font-medium">{itemToDelete?.name}</p>
+                    <p className="text-xs text-slate-400 mt-1">SKU: {itemToDelete?.sku || 'Tanpa SKU'}</p>
+                    <p className="text-xs text-slate-400 mt-1">Sisa Stok: <span className="font-bold text-slate-600">{itemToDelete?.stock} {itemToDelete?.unit}</span></p>
+                </div>
+            </CustomModal>
+
+            {/* ── MODAL FORM ── */}
+            <CustomModal
+                isOpen={isModalOpen} onClose={closeModal}
+                title={editingProduct ? "Edit Data Master Sparepart" : "Daftarkan Sparepart Baru"}
+                subtitle={editingProduct ? `Ubah detail produk SKU: ${editingProduct.sku || '-'}` : "Masukkan data awal produk ke dalam inventaris."}
+                variant="form"
+                footer={
+                    <>
+                        <CustomButton variant="base" onClick={closeModal} disabled={processing}>Batal</CustomButton>
+                        <CustomButton variant="primary" onClick={handleSubmit} disabled={processing}>
+                            {processing ? 'Menyimpan...' : (editingProduct ? 'Simpan Perubahan' : 'Daftarkan Produk')}
+                        </CustomButton>
+                    </>
+                }
+            >
+                <div className="pt-2 flex flex-col gap-6">
+
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Nama Produk *</label>
+                        <FormInput placeholder="Contoh: Oli Mesran Super 1L" value={data.name} onChange={(e: any) => setData('name', e.target.value)} error={errors.name} />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">SKU / Barcode</label>
+                            <FormInput placeholder="Opsional (Kode unik)..." value={data.sku} onChange={(e: any) => setData('sku', e.target.value)} error={errors.sku} />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Stok Manual *</label>
+                            {/* PERBAIKAN 3: type diubah ke text, lalu onChange memfilter angka murni tanpa 0 di depan */}
+                            <FormInput
+                                type="text"
+                                placeholder="0"
+                                value={data.stock}
+                                onChange={(e: any) => {
+                                    const rawValue = String(e.target.value).replace(/\D/g, ''); // Hanya boleh angka
+                                    setData('stock', rawValue === '' ? '' : Number(rawValue));
+                                }}
+                                error={errors.stock}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Satuan Barang *</label>
+                            <FormInput placeholder="Pcs, Liter, Botol..." value={data.unit} onChange={(e: any) => setData('unit', e.target.value)} error={errors.unit} />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Estimasi Harga Modal *</label>
+                            {/* PERBAIKAN 4: Filter yang sama untuk harga beli */}
+                            <FormInput
+                                type="text" isCurrency={true} prefixIcon={<span className="text-[11px] font-bold px-1 text-slate-400">Rp</span>}
+                                placeholder="0" value={data.purchase_price}
+                                onChange={(e: any) => {
+                                    const rawValue = String(e.target.value).replace(/\D/g, '');
+                                    setData('purchase_price', rawValue === '' ? '' : Number(rawValue));
+                                }}
+                                error={errors.purchase_price}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Harga Jual Kasir *</label>
+                            {/* PERBAIKAN 5: Filter yang sama untuk harga jual */}
+                            <FormInput
+                                type="text" isCurrency={true} prefixIcon={<span className="text-[11px] font-bold px-1 text-slate-400">Rp</span>}
+                                placeholder="0" value={data.selling_price}
+                                onChange={(e: any) => {
+                                    const rawValue = String(e.target.value).replace(/\D/g, '');
+                                    setData('selling_price', rawValue === '' ? '' : Number(rawValue));
+                                }}
+                                error={errors.selling_price}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 border-t border-slate-100 pt-5">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Supplier Utama</label>
+                            <select value={data.supplier_id} onChange={e => setData('supplier_id', e.target.value)} className="w-full h-11 px-4 text-sm font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:border-bengkel-yellow focus:ring-2 focus:ring-bengkel-yellow-light/30 transition-all cursor-pointer">
+                                <option value="">-- Pilih Supplier --</option>
+                                {suppliers.map((s: Supplier) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                            {errors.supplier_id && <p className="text-red-500 text-[10px] mt-1 font-semibold">{errors.supplier_id}</p>}
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Upload Foto (Max 2MB)</label>
+                            <input type="file" accept="image/*" onChange={e => setData('image', e.target.files ? e.target.files[0] : null)} className="w-full text-sm text-slate-500 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-[11px] file:font-bold file:bg-bengkel-orange/10 file:text-bengkel-orange hover:file:bg-bengkel-orange/20 transition-colors cursor-pointer" />
+                            {errors.image && <p className="text-red-500 text-[10px] mt-1 font-semibold">{errors.image}</p>}
+                            {editingProduct?.image && !data.image && <div className="mt-2 text-[10px] font-bold text-amber-600 bg-amber-50 px-3 py-2 rounded-lg border border-amber-100">* Abaikan jika tidak ingin mengubah foto.</div>}
+                        </div>
+                    </div>
+                </div>
+            </CustomModal>
+        </div>
     );
 }

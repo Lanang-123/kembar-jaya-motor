@@ -11,6 +11,7 @@ class VehicleController extends Controller
     public function index(Request $request)
     {
         $search = $request->input('search');
+        $perPage = $request->input('perPage', 10);
 
         return Inertia::render('vehicle/index', [
             'vehicles' => Vehicle::query()
@@ -19,9 +20,12 @@ class VehicleController extends Controller
                           ->orWhere('customer_name', 'like', "%{$search}%");
                 })
                 ->latest()
-                ->paginate(10)
+                ->paginate($perPage)
                 ->withQueryString(),
-            'filters' => ['search' => $search]
+            'filters' => [
+                'search' => $search,
+                'perPage' => $perPage
+            ]
         ]);
     }
 

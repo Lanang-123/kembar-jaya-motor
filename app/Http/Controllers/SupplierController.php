@@ -15,6 +15,9 @@ class SupplierController extends Controller
     {
         $search = $request->input('search');
 
+        // 1. TANGKAP PARAMETER perPage (Default 10)
+        $perPage = $request->input('perPage', 10);
+
         return Inertia::render('suppliers/index', [
             'suppliers' => Supplier::query()
                 ->when($search, function ($query, $search) {
@@ -22,9 +25,15 @@ class SupplierController extends Controller
                           ->orWhere('contact_person', 'like', "%{$search}%");
                 })
                 ->latest()
-                ->paginate(10)
+                // 2. MASUKKAN $perPage KE DALAM PAGINATE
+                ->paginate($perPage)
                 ->withQueryString(),
-            'filters' => ['search' => $search]
+
+            // 3. KEMBALIKAN STATE KE FRONTEND
+            'filters' => [
+                'search' => $search,
+                'perPage' => $perPage
+            ]
         ]);
     }
 
